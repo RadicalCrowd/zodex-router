@@ -54,7 +54,7 @@ user.
    key or a `command-code login` browser sign-in — see step 5). The
    catalog-only providers `groq`, `openrouter`, `together`, `fireworks`,
    `cerebras`, `mistral`, `nvidia-nim`, `siliconflow`, `huggingface`,
-   `gemini-api`, `github-copilot`, and `chutes` are also selectable, but they ship no
+   `gemini-api`, `github-copilot`, `chutes`, and `omniroute-oauth` are also selectable, but they ship no
    preselected models: after
    the credential is stored, the user must run `bin/curate-models PROVIDER` in an
    interactive terminal to choose models. If they did not specify and
@@ -65,6 +65,11 @@ user.
    model subsets. They ship no preselected models and must be explicitly
    selected before `bin/curate-models PROVIDER` is run; never select either one
    on the user's behalf just because it can authenticate without a key.
+   `omniroute-oauth` is a fixed-loopback, catalog-only broker surface. It stores
+   only a dedicated OmniRoute inference endpoint key; OAuth credentials remain
+   in OmniRoute. Curate only explicit `provider/model` ids, never `auto`, combo,
+   or fallback routes, and never enable it without the two Zodex config-file
+   acknowledgements.
    `kimi-api` and `kimi-api-cn` are two different Moonshot platforms, not a
    fallback pair: the global console at platform.moonshot.ai and the mainland
    one at platform.moonshot.cn have separate accounts, separate billing, and

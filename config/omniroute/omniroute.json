@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "omniroute-oauth",
+      "displayName": "OmniRoute OAuth Broker",
+      "kind": "openai-compatible",
+      "ownedBy": "omniroute",
+      "baseUrl": "http://127.0.0.1:20128/v1",
+      "credential": {
+        "environment": [
+          "OMNIROUTE_API_KEY"
+        ],
+        "file": "omniroute-endpoint-key.secret",
+        "legacyFiles": [],
+        "keychainServices": [
+          "zodex-router-omniroute-endpoint"
+        ],
+        "label": "OmniRoute endpoint key",
+        "prompt": "OmniRoute inference endpoint key"
+      },
+      "planNote": "Local OAuth broker only. OAuth credentials stay in OmniRoute. Provider policy and account enforcement still apply; activation requires the two Zodex config acknowledgements."
+    }
+  ]
+}

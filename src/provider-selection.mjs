@@ -16,6 +16,7 @@ import { targetCli } from "./target-integration.mjs";
 import { kimiOAuthStatus } from "./oauth-status.mjs";
 import { grokOAuthStatus } from "./grok-oauth-status.mjs";
 import { credentialStatus } from "./provider-credentials.mjs";
+import { applyZodexProviderPolicy } from "./zodex-policy.mjs";
 
 const RETIRED_PROVIDER_ALIASES = new Map([["chatgpt-oauth", "grok-oauth"]]);
 
@@ -121,17 +122,17 @@ export function readProviderSelectionDetail() {
     process.env.MODEL_ROUTER_SHOW_ALL_MODELS === "1" ||
     (TARGET === "codex" && process.env.CODEX_ROUTER_SHOW_ALL_MODELS === "1")
   ) {
-    return { providers: providerIds(), ignored: [], degraded: undefined };
+    return { providers: applyZodexProviderPolicy(providerIds()), ignored: [], degraded: undefined };
   }
   if (!existsSync(PROVIDER_SELECTION_PATH)) {
-    return { providers: providerIds(), ignored: [], degraded: undefined };
+    return { providers: applyZodexProviderPolicy(providerIds()), ignored: [], degraded: undefined };
   }
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(PROVIDER_SELECTION_PATH, "utf8"));
   } catch (error) {
     return {
-      providers: providerIds(),
+      providers: applyZodexProviderPolicy(providerIds()),
       ignored: [],
       degraded: `Unreadable provider selection ${PROVIDER_SELECTION_PATH}: ${
         error instanceof Error ? error.message : String(error)
@@ -140,7 +141,7 @@ export function readProviderSelectionDetail() {
   }
   if (parsed?.version !== 1 || !Array.isArray(parsed.providers)) {
     return {
-      providers: providerIds(),
+      providers: applyZodexProviderPolicy(providerIds()),
       ignored: [],
       degraded: `Invalid provider selection ${PROVIDER_SELECTION_PATH}: version/providers are invalid`,
     };
@@ -156,7 +157,7 @@ export function readProviderSelectionDetail() {
   // still hides anything that cannot authenticate.
   if (known.length === 0 && unknown.length > 0) {
     return {
-      providers: providerIds(),
+      providers: applyZodexProviderPolicy(providerIds()),
       ignored: unknown,
       degraded: `Provider selection ${PROVIDER_SELECTION_PATH} names no provider this build knows (${
         unknown.join(", ")
@@ -164,7 +165,7 @@ export function readProviderSelectionDetail() {
     };
   }
   return {
-    providers: expandProviderIds(known),
+    providers: applyZodexProviderPolicy(expandProviderIds(known)),
     ignored: unknown,
     degraded: unknown.length
       ? `Provider selection ${PROVIDER_SELECTION_PATH} names unknown providers: ${unknown.join(", ")}`

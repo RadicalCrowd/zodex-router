@@ -510,6 +510,7 @@ often for the repository to pin and live-verify individual entries:
 | --- | --- | --- |
 | Groq | `groq` | `https://api.groq.com/openai/v1` |
 | OpenRouter | `openrouter` | `https://openrouter.ai/api/v1` |
+| OmniRoute OAuth Broker | `omniroute-oauth` | `http://127.0.0.1:20128/v1` |
 | Together AI | `together` | `https://api.together.xyz/v1` |
 | Fireworks AI | `fireworks` | `https://api.fireworks.ai/inference/v1` |
 | Cerebras | `cerebras` | `https://api.cerebras.ai/v1` |

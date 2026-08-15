@@ -39,6 +39,9 @@ const {
 } = await import("../src/provider-selection.mjs");
 const { PROVIDER_SELECTION_PATH } = await import("../src/paths.mjs");
 const { privateFileIsProtected } = await import("../src/file-security.mjs");
+const defaultVisibleProviderIds = [...PROVIDERS.keys()].filter(
+  (id) => id !== "omniroute-oauth",
+);
 
 // Write the selection file behind the API so a test can stage the exact state a
 // newer checkout, or a corrupt write, leaves behind for an older running build.
@@ -49,9 +52,9 @@ function stageSelectionFile(contents) {
 
 test("provider selection keeps backward compatibility and can hide the final provider", () => {
   try {
-    // No selection file means every registry provider stays visible; the
-    // credential-aware catalog is what hides providers that cannot authenticate.
-    assert.deepEqual(readProviderSelection(), [...PROVIDERS.keys()]);
+    // No selection file means every ordinary registry provider stays visible;
+    // OmniRoute alone remains behind the Zodex config acknowledgement gate.
+    assert.deepEqual(readProviderSelection(), defaultVisibleProviderIds);
     process.env.KIMI_API_KEY = "TEST_ENVIRONMENT_ONLY_KEY";
     // Local backends are keyless: they serve from this machine, so there is no
     // credential to configure and they are always available. Everything else
@@ -221,7 +224,7 @@ test("a selection naming only unknown providers falls back to the no-file defaul
       })}\n`,
     );
 
-    assert.deepEqual(readProviderSelection(), [...PROVIDERS.keys()]);
+    assert.deepEqual(readProviderSelection(), defaultVisibleProviderIds);
     const detail = readProviderSelectionDetail();
     assert.deepEqual(detail.ignored, [
       "provider-from-a-newer-build",
@@ -252,11 +255,11 @@ test("an explicitly empty selection still hides every provider", () => {
 test("an unreadable or wrong-version selection file degrades instead of throwing", () => {
   try {
     stageSelectionFile("{ not json at all");
-    assert.deepEqual(readProviderSelection(), [...PROVIDERS.keys()]);
+    assert.deepEqual(readProviderSelection(), defaultVisibleProviderIds);
     assert.match(readProviderSelectionDetail().degraded, /Unreadable provider selection/);
 
     stageSelectionFile(`${JSON.stringify({ version: 99, providers: ["deepseek"] })}\n`);
-    assert.deepEqual(readProviderSelection(), [...PROVIDERS.keys()]);
+    assert.deepEqual(readProviderSelection(), defaultVisibleProviderIds);
     assert.match(readProviderSelectionDetail().degraded, /version\/providers are invalid/);
   } finally {
     rmSync(testRoot, { recursive: true, force: true });

@@ -11,6 +11,7 @@ import { grokCliPreflight } from "./grok-cli.mjs";
 import { detectLegacyInstallations } from "./legacy-migration.mjs";
 import { routedCatalogConfigured } from "./catalog.mjs";
 import { MODEL_BY_SLUG, PROVIDERS } from "./model-registry.mjs";
+import { probeOmniroute } from "./omniroute-broker.mjs";
 import { grokOAuthStatus } from "./grok-oauth-status.mjs";
 import { kimiOAuthHealth } from "./oauth-status.mjs";
 import {
@@ -40,7 +41,11 @@ import {
   skillRequiredFields,
 } from "./skills-install.mjs";
 import { cliSessionDescriptor } from "./cli-session-credential.mjs";
-import { credentialLabel, credentialStatus } from "./provider-credentials.mjs";
+import {
+  credentialLabel,
+  credentialStatus,
+  resolveProviderCredential,
+} from "./provider-credentials.mjs";
 import { providerNeedsCuration } from "./provider-onboarding.mjs";
 import { stateOwnershipStatus } from "./state-owner.mjs";
 import {
@@ -667,6 +672,25 @@ for (const provider of PROVIDERS.values()) {
   // doctor does not lecture about providers nobody enabled.
   if (provider.planNote && selection.providers.includes(provider.id)) {
     add("warn", `${provider.displayName} plan`, provider.planNote, "Check the plan on the provider's billing page.");
+  }
+  if (
+    provider.id === "omniroute-oauth" &&
+    selection.providers.includes(provider.id) &&
+    status.configured
+  ) {
+    const credential = resolveProviderCredential(provider, { persistent: true });
+    const health = await probeOmniroute({
+      baseUrl: provider.baseUrl,
+      endpointKey: credential?.value,
+    });
+    add(
+      health.ok ? "ok" : "fail",
+      "OmniRoute broker endpoint",
+      health.detail,
+      health.ok
+        ? "Curate only explicit provider/model ids; do not add auto, combo, or fallback routes."
+        : "Start OmniRoute on 127.0.0.1:20128 with endpoint-key authentication, then rerun the doctor.",
+    );
   }
   // A working key on a catalog-only provider still shows an empty picker until
   // its models are curated, and nothing else says so after the key is stored.

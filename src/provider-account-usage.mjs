@@ -807,6 +807,14 @@ async function accountUsageFor(providerId, fetchImpl) {
     if (providerId === "opencode-free" || providerId === "kilo-free") {
       return withHeaderQuota(providerId, localOnly("Anonymous free-provider quota is not exposed; showing router traffic"));
     }
+    if (providerId === "omniroute-oauth") {
+      return resolveProviderCredential(providerId)
+        ? withHeaderQuota(
+            providerId,
+            localOnly("OAuth plan usage stays in OmniRoute and the upstream provider; showing router traffic"),
+          )
+        : { status: "not-configured", source: "local-router", metrics: [] };
+    }
     if (providerId === "github-copilot") return await githubCopilotAccount(fetchImpl);
     // Every remaining provider — including the catalog-only ones — reports its
     // window through response headers or shows router traffic alone.

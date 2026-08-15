@@ -17,5 +17,6 @@ blue accent and DeepSeek's original blue mark are preserved.
 | Chutes | https://chutes.ai/ | Inline SVG mark from the official site header |
 | OpenCode Free | https://opencode.ai/brand | Monochrome adaptation of the official OpenCode mark |
 | Kilo Free | https://kilo.ai/open | https://github.com/Kilo-Org/kilocode/blob/main/packages/kilo-vscode/assets/icons/kilo-dark.svg (Apache-2.0 repository asset) |
+| OmniRoute | https://github.com/diegosouzapw/OmniRoute | `public/favicon.svg` from pinned release branch `release/v3.8.50` (MIT repository asset) |
 
 The marks remain trademarks of their respective owners.

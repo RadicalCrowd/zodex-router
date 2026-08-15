@@ -43,6 +43,7 @@ import {
   readProviderSelection,
   selectedConfiguredListedModels,
 } from "./provider-selection.mjs";
+import { zodexOmnirouteModelEnabled } from "./zodex-policy.mjs";
 import {
   estimateInputTokens,
   mergeTokenUsage,
@@ -1760,15 +1761,21 @@ async function handleResponses(request, response, requestUrl) {
         registeredRoute = redirect;
       }
     }
-    route = registeredRoute && readProviderSelection().includes(registeredRoute.provider)
-      ? registeredRoute
-      : undefined;
+    const providerEnabled = registeredRoute &&
+      readProviderSelection().includes(registeredRoute.provider);
+    const zodexModelEnabled = registeredRoute?.provider !== "omniroute-oauth" ||
+      zodexOmnirouteModelEnabled(registeredRoute.upstreamModel);
+    route = providerEnabled && zodexModelEnabled ? registeredRoute : undefined;
     if (registeredRoute && !route) {
+      const zodexPolicyBlocked = registeredRoute.provider === "omniroute-oauth" &&
+        !zodexModelEnabled;
       writeJson(response, 409, {
         error: {
-          type: "provider_not_enabled",
+          type: zodexPolicyBlocked ? "zodex_oauth_acknowledgement_required" : "provider_not_enabled",
           provider: registeredRoute.provider,
-          message: `Provider ${registeredRoute.provider} is hidden. Run ./bin/providers enable ${registeredRoute.provider}.`,
+          message: zodexPolicyBlocked
+            ? `Provider ${registeredRoute.provider} is off for this model. Complete both acknowledgements in ~/.config/zodex/config.json and refresh Zodex.`
+            : `Provider ${registeredRoute.provider} is hidden. Run ./bin/providers enable ${registeredRoute.provider}.`,
         },
       });
       return;

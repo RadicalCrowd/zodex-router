@@ -9,6 +9,8 @@ import {
   resolveProviderBaseUrl,
 } from "./model-registry.mjs";
 import { credentialStatus, resolveProviderCredential } from "./provider-credentials.mjs";
+import { isDirectOmnirouteModelId } from "./omniroute-broker.mjs";
+import { zodexOmnirouteModelEnabled } from "./zodex-policy.mjs";
 import {
   ensureFreshGitHubCopilotSession,
   githubCopilotCatalogHeaders,
@@ -36,7 +38,11 @@ export function modelIds(payload, provider) {
         Array.isArray(item?.supported_endpoints) &&
         item.supported_endpoints.includes("/responses")
       )
-    : data;
+    : provider?.id === "omniroute-oauth"
+      ? data.filter((item) =>
+          isDirectOmnirouteModelId(item?.id) && zodexOmnirouteModelEnabled(item.id)
+        )
+      : data;
   return [...new Set(candidates.map((item) => String(item?.id || "").trim()).filter(Boolean))].sort();
 }
 
