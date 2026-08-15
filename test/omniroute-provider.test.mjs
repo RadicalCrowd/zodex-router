@@ -18,6 +18,7 @@ test("OmniRoute is a catalog-only loopback provider with an isolated endpoint ke
   const provider = PROVIDERS.get("omniroute-oauth");
   assert.equal(provider.displayName, "OmniRoute OAuth Broker");
   assert.equal(provider.kind, "openai-compatible");
+  assert.equal(provider.protocol, "openai-responses");
   assert.equal(provider.baseUrl, "http://127.0.0.1:20128/v1");
   assert.equal(provider.baseUrlEnv, undefined);
   assert.equal(provider.credential.file, "omniroute-endpoint-key.secret");

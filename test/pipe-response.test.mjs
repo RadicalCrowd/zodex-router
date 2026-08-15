@@ -64,6 +64,66 @@ test("pipeResponse settles when the client disconnects mid-stream", async () => 
   assert.equal(pipeError, undefined);
 });
 
+test("pipeResponse propagates a downstream disconnect across two HTTP proxy hops", async () => {
+  let upstreamClosed = false;
+  const proxyErrors = [];
+  let heartbeat;
+  const upstreamServer = http.createServer((request, response) => {
+    response.once("close", () => {
+      upstreamClosed = true;
+      clearInterval(heartbeat);
+    });
+    response.writeHead(200, { "Content-Type": "text/event-stream" });
+    response.write("data: first\n\n");
+    heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 25);
+  });
+  const upstreamPort = await listen(upstreamServer);
+
+  function proxyTo(target) {
+    return http.createServer(async (request, response) => {
+      const controller = new AbortController();
+      response.once("close", () => {
+        if (!response.writableEnded) controller.abort();
+      });
+      try {
+        const upstream = await fetch(target, { signal: controller.signal });
+        await pipeResponse(upstream, response, new Set(), undefined, {
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (!response.destroyed) proxyErrors.push(error);
+      }
+    });
+  }
+  const innerProxy = proxyTo(`http://127.0.0.1:${upstreamPort}/stream`);
+  const innerPort = await listen(innerProxy);
+  const outerProxy = proxyTo(`http://127.0.0.1:${innerPort}/stream`);
+  const outerPort = await listen(outerProxy);
+
+  await new Promise((resolve) => {
+    const request = http.request({ host: "127.0.0.1", port: outerPort, path: "/" }, (response) => {
+      response.once("data", () => {
+        request.destroy();
+        resolve();
+      });
+    });
+    request.once("error", resolve);
+    request.end();
+  });
+
+  const deadline = Date.now() + 2_000;
+  while (!upstreamClosed && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+
+  clearInterval(heartbeat);
+  await close(outerProxy);
+  await close(innerProxy);
+  await close(upstreamServer);
+  assert.deepEqual(proxyErrors, []);
+  assert.equal(upstreamClosed, true, "the real upstream stream stayed open after client disconnect");
+});
+
 test("pipeResponse resolves after a complete response", async () => {
   let settled = false;
 

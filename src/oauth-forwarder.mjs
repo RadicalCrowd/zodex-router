@@ -220,7 +220,9 @@ async function handleRequest(request, response) {
       return;
     }
   }
-  await pipeResponse(upstream, response);
+  await pipeResponse(upstream, response, undefined, undefined, {
+    signal: controller.signal,
+  });
   if (!QUIET) {
     console.error(
       `[kimi-oauth] ${request.method} ${route} -> ${upstream.status} ${Date.now() - startedAt}ms`,

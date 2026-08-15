@@ -202,7 +202,7 @@ export async function pipeResponse(
   response,
   denylist,
   transform,
-  { leaveOpen = false } = {},
+  { leaveOpen = false, signal } = {},
 ) {
   const transforms = transform === undefined
     ? []
@@ -222,7 +222,10 @@ export async function pipeResponse(
     // response half-written and open forever. `end: false` keeps the response
     // itself out of that teardown so the caller can end the body cleanly (see
     // `endStreamedResponse`) instead of resetting the socket.
-    await pipeline(source, ...transforms, response, { end: false });
+    await pipeline(source, ...transforms, response, {
+      end: false,
+      ...(signal ? { signal } : {}),
+    });
   } catch (error) {
     // A client that disconnects mid-stream destroys the response, which
     // pipeline reports as a premature close. That is not a router failure, and

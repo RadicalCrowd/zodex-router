@@ -725,7 +725,9 @@ async function handleRequest(request, response) {
       signal: controller.signal,
     });
   }
-  await pipeResponse(upstream, response);
+  await pipeResponse(upstream, response, undefined, undefined, {
+    signal: controller.signal,
+  });
   // Harvest the provider's own quota report from the response it just sent.
   // Costs no extra request and works for any provider that emits the standard
   // headers, so a newly added provider reports limits without bespoke code.

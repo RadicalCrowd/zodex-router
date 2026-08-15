@@ -36,19 +36,31 @@ sequenceDiagram
     R-->>C: Responses stream
   else Registry model
     C->>R: Capability URL + Responses request + namespaced model
-    R->>L: Gateway model + internal key
-    L->>L: Responses to Chat Completions
-    alt Kimi Code OAuth
+    alt Responses-native API provider
+      R->>A: Responses request + internal key
+      A->>P: Exact upstream model + selected provider key
+      P-->>R: Responses stream
+    else Translated provider
+      R->>L: Gateway model + internal key
+      L->>L: Responses to Chat Completions
+      alt Kimi Code OAuth
       L->>O: Chat request + internal key
       O->>P: Kimi model + refreshed OAuth bearer
-    else API-key provider
+      else API-key provider
       L->>A: Chat request + internal key
       A->>P: Upstream model + selected provider key
+      end
+      P-->>L: Chat Completions stream
+      L-->>R: Responses events
     end
-    P-->>L: Chat Completions stream
-    L-->>C: Responses events through router
+    R-->>C: Responses events
   end
 ```
+
+`omniroute-oauth` is the first Responses-native API provider. Keeping it out of
+LiteLLM avoids a redundant translation that can discard reasoning controls;
+the API forwarder still replaces the router's internal key with the dedicated
+local OmniRoute endpoint key.
 
 ## One registry, multiple consumers
 

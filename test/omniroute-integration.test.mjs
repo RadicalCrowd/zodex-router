@@ -58,15 +58,35 @@ async function waitForRouter(port, child, output) {
   throw new Error(`Timed out waiting for the integration stack: ${output()}`);
 }
 
-function chatText(body) {
-  return (body.messages || [])
-    .flatMap((message) => Array.isArray(message.content) ? message.content : [message.content])
+function payloadText(body) {
+  const rows = Array.isArray(body.messages)
+    ? body.messages
+    : Array.isArray(body.input)
+      ? body.input
+      : body.input === undefined
+        ? []
+        : [body.input];
+  return rows
+    .flatMap((item) => {
+      if (typeof item === "string") return [item];
+      if (item?.type === "function_call_output") return [item.output];
+      return Array.isArray(item?.content) ? item.content : [item?.content];
+    })
     .map((part) => typeof part === "string" ? part : part?.text || "")
     .join("\n");
 }
 
+async function waitFor(predicate, message, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(message);
+}
+
 test(
-  "Codex Responses reaches only the exact acknowledged OmniRoute model through the real gateway",
+  "Codex Responses reaches only the exact acknowledged OmniRoute model through its Responses surface",
   {
     skip: !enabled
       ? "set MODEL_ROUTER_LITELLM_INTEGRATION=1 for the pinned-adapter integration test"
@@ -140,6 +160,7 @@ test(
     );
 
     const received = [];
+    let cancellationObserved = false;
     const mock = http.createServer(async (request, response) => {
       if (request.method === "GET" && request.url === "/v1/models") {
         response.writeHead(200, { "Content-Type": "application/json" });
@@ -150,41 +171,108 @@ test(
       for await (const chunk of request) chunks.push(chunk);
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
       received.push({ url: request.url, headers: request.headers, body });
-      const text = chatText(body);
+      const text = payloadText(body);
       if (text.includes("ERROR_MARKER")) {
         response.writeHead(429, { "Content-Type": "application/json", "Retry-After": "7" });
         response.end(JSON.stringify({ error: { message: "fake broker quota" } }));
         return;
       }
+      if (text.includes("CANCEL_MARKER")) {
+        let heartbeat;
+        const markCanceled = () => {
+          cancellationObserved = true;
+          clearInterval(heartbeat);
+        };
+        request.once("aborted", markCanceled);
+        response.once("close", markCanceled);
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        response.write(`event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: {
+            id: "resp_zodex_cancel",
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            status: "in_progress",
+            model: UPSTREAM_MODEL,
+            output: [],
+          },
+        })}\n\n`);
+        response.write(`event: response.output_text.delta\ndata: ${JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_zodex_cancel",
+          output_index: 0,
+          content_index: 0,
+          delta: "CANCEL_STARTED",
+        })}\n\n`);
+        heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 25);
+        return;
+      }
       if (body.stream) {
         response.writeHead(200, { "Content-Type": "text/event-stream" });
-        response.write(`data: ${JSON.stringify({
-          id: "chatcmpl_zodex_stream",
-          object: "chat.completion.chunk",
-          model: UPSTREAM_MODEL,
-          choices: [{ index: 0, delta: { role: "assistant", content: "OMNIROUTE_STREAM_OK" } }],
+        response.write(`event: response.created\ndata: ${JSON.stringify({
+          type: "response.created",
+          response: {
+            id: "resp_zodex_stream",
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            status: "in_progress",
+            model: UPSTREAM_MODEL,
+            output: [],
+          },
+        })}\n\n`);
+        response.write(`event: response.output_text.delta\ndata: ${JSON.stringify({
+          type: "response.output_text.delta",
+          item_id: "msg_zodex_stream",
+          output_index: 0,
+          content_index: 0,
+          delta: "OMNIROUTE_STREAM_OK",
+        })}\n\n`);
+        response.write(`event: response.completed\ndata: ${JSON.stringify({
+          type: "response.completed",
+          response: {
+            id: "resp_zodex_stream",
+            object: "response",
+            created_at: Math.floor(Date.now() / 1000),
+            status: "completed",
+            model: UPSTREAM_MODEL,
+            output: [{
+              id: "msg_zodex_stream",
+              type: "message",
+              role: "assistant",
+              status: "completed",
+              content: [{ type: "output_text", text: "OMNIROUTE_STREAM_OK", annotations: [] }],
+            }],
+            usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 },
+          },
         })}\n\n`);
         response.end("data: [DONE]\n\n");
         return;
       }
-      const message = Array.isArray(body.tools) && body.tools.length
-        ? {
+      const output = Array.isArray(body.tools) && body.tools.length
+        ? [{
+            id: "fc_zodex_contract",
+            type: "function_call",
+            call_id: "call_zodex_contract",
+            name: "lookup_fixture",
+            arguments: '{"item":"zodex"}',
+            status: "completed",
+          }]
+        : [{
+            id: "msg_zodex_contract",
+            type: "message",
             role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "call_zodex_contract",
-              type: "function",
-              function: { name: "lookup_fixture", arguments: '{"item":"zodex"}' },
-            }],
-          }
-        : { role: "assistant", content: "OMNIROUTE_TEXT_OK" };
+            status: "completed",
+            content: [{ type: "output_text", text: "OMNIROUTE_TEXT_OK", annotations: [] }],
+          }];
       response.writeHead(200, { "Content-Type": "application/json" });
       response.end(JSON.stringify({
-        id: "chatcmpl_zodex_contract",
-        object: "chat.completion",
+        id: "resp_zodex_contract",
+        object: "response",
+        created_at: Math.floor(Date.now() / 1000),
+        status: "completed",
         model: UPSTREAM_MODEL,
-        choices: [{ index: 0, message, finish_reason: body.tools?.length ? "tool_calls" : "stop" }],
-        usage: { prompt_tokens: 12, completion_tokens: 4, total_tokens: 16 },
+        output,
+        usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 },
       }));
     });
     try {
@@ -260,6 +348,66 @@ test(
       assert.equal(toolResponse.status, 200, `${toolBody}\n${stackOutput}`);
       assert.match(toolBody, /lookup_fixture/);
 
+      const toolResultResponse = await fetch(`${base}/responses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: ROUTER_MODEL,
+          input: [
+            {
+              type: "function_call",
+              call_id: "call_zodex_contract",
+              name: "lookup_fixture",
+              arguments: '{"item":"zodex"}',
+            },
+            {
+              type: "function_call_output",
+              call_id: "call_zodex_contract",
+              output: "TOOL_RESULT_MARKER",
+            },
+            {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "continue after the tool result" }],
+            },
+          ],
+          stream: false,
+        }),
+      });
+      const toolResultBody = await toolResultResponse.text();
+      assert.equal(toolResultResponse.status, 200, `${toolResultBody}\n${stackOutput}`);
+      assert.match(toolResultBody, /OMNIROUTE_TEXT_OK/);
+
+      const reasoningResponse = await fetch(`${base}/responses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: ROUTER_MODEL,
+          input: "REASONING_MARKER",
+          reasoning: { effort: "high" },
+          stream: false,
+        }),
+      });
+      const reasoningBody = await reasoningResponse.text();
+      assert.equal(reasoningResponse.status, 200, `${reasoningBody}\n${stackOutput}`);
+      assert.match(reasoningBody, /OMNIROUTE_TEXT_OK/);
+
+      const compactResponse = await fetch(`${base}/responses/compact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: ROUTER_MODEL,
+          input: [{
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "COMPACTION_MARKER" }],
+          }],
+        }),
+      });
+      const compactBody = await compactResponse.text();
+      assert.equal(compactResponse.status, 200, `${compactBody}\n${stackOutput}`);
+      assert.match(compactBody, /OMNIROUTE_TEXT_OK/);
+
       const streamResponse = await fetch(`${base}/responses`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -268,6 +416,40 @@ test(
       const streamBody = await streamResponse.text();
       assert.equal(streamResponse.status, 200, `${streamBody}\n${stackOutput}`);
       assert.match(streamBody, /OMNIROUTE_STREAM_OK/);
+
+      const cancelUrl = new URL(`${base}/responses`);
+      await new Promise((resolve, reject) => {
+        const request = http.request(
+          {
+            host: cancelUrl.hostname,
+            port: cancelUrl.port,
+            path: cancelUrl.pathname,
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          },
+          (response) => {
+            response.once("data", () => {
+              response.socket.destroy();
+              resolve();
+            });
+          },
+        );
+        request.once("error", (error) => {
+          if (error?.code === "ECONNRESET") resolve();
+          else reject(error);
+        });
+        request.end(JSON.stringify({
+          model: ROUTER_MODEL,
+          input: "CANCEL_MARKER",
+          stream: true,
+        }));
+      });
+      await waitFor(
+        () => cancellationObserved,
+        `client cancellation did not propagate through Router and the API forwarder; ` +
+          `cancel_requests=${received.filter(({ body }) => payloadText(body).includes("CANCEL_MARKER")).length}; ` +
+          `stack=${stackOutput}`,
+      );
 
       const errorResponse = await fetch(`${base}/responses`, {
         method: "POST",
@@ -279,15 +461,27 @@ test(
       assert.match(errorBody, /fake broker quota|rate limit|quota/iu);
 
       assert.equal(
-        received.filter(({ body }) => chatText(body).includes("TOOL_IMAGE_MARKER")).length,
+        received.filter(({ body }) => payloadText(body).includes("TOOL_IMAGE_MARKER")).length,
         1,
       );
       assert.equal(
-        received.filter(({ body }) => chatText(body).includes("STREAM_MARKER")).length,
+        received.filter(({ body }) => payloadText(body).includes("STREAM_MARKER")).length,
+        1,
+      );
+      assert.equal(
+        received.filter(({ body }) => payloadText(body).includes("REASONING_MARKER")).length,
+        1,
+      );
+      assert.equal(
+        received.filter(({ body }) => payloadText(body).includes("COMPACTION_MARKER")).length,
+        1,
+      );
+      assert.equal(
+        received.filter(({ body }) => payloadText(body).includes("CANCEL_MARKER")).length,
         1,
       );
       assert.ok(
-        received.filter(({ body }) => chatText(body).includes("ERROR_MARKER")).length >= 1,
+        received.filter(({ body }) => payloadText(body).includes("ERROR_MARKER")).length >= 1,
         "the gateway may retry a 429, but only against the same exact model",
       );
       assert.deepEqual(
@@ -296,20 +490,34 @@ test(
         "no retry may substitute or fall back to another model",
       );
       for (const request of received) {
-        assert.equal(request.url, "/v1/chat/completions");
+        assert.equal(request.url, "/v1/responses");
         assert.equal(request.body.model, UPSTREAM_MODEL);
         assert.equal(request.headers.authorization, `Bearer ${ENDPOINT_KEY}`);
         assert.equal(request.headers["chatgpt-account-id"], undefined);
         assert.notEqual(request.headers.authorization, `Bearer ${INTERNAL_KEY}`);
       }
       assert.ok(
-        received[0].body.messages.some((message) =>
+        received[0].body.input.some((message) =>
           Array.isArray(message.content) &&
-          message.content.some((part) => part?.type === "image_url")
+          message.content.some((part) => part?.type === "input_image")
         ),
         "image input should reach an image-capable curated model",
       );
-      assert.equal(received[0].body.tools[0].function.name, "lookup_fixture");
+      assert.equal(received[0].body.tools[0].name, "lookup_fixture");
+      const toolResultRequest = received.find(({ body }) =>
+        payloadText(body).includes("continue after the tool result")
+      );
+      assert.ok(toolResultRequest);
+      assert.ok(toolResultRequest.body.input.some((item) =>
+        item.type === "function_call_output" &&
+        item.call_id === "call_zodex_contract" &&
+        item.output === "TOOL_RESULT_MARKER"
+      ));
+      const reasoningRequest = received.find(({ body }) =>
+        payloadText(body).includes("REASONING_MARKER")
+      );
+      assert.ok(reasoningRequest);
+      assert.equal(reasoningRequest.body.reasoning.effort, "high");
     } finally {
       await stopProcess(stack);
       await new Promise((resolve) => mock.close(resolve));

@@ -67,9 +67,11 @@ user.
    on the user's behalf just because it can authenticate without a key.
    `omniroute-oauth` is a fixed-loopback, catalog-only broker surface. It stores
    only a dedicated OmniRoute inference endpoint key; OAuth credentials remain
-   in OmniRoute. Curate only explicit `provider/model` ids, never `auto`, combo,
-   or fallback routes, and never enable it without the two Zodex config-file
-   acknowledgements.
+   in OmniRoute. Because OmniRoute already implements the Responses API, this
+   provider goes directly through the authenticated API forwarder instead of
+   LiteLLM; do not add a second Responses-to-chat translation hop. Curate only
+   explicit `provider/model` ids, never `auto`, combo, or fallback routes, and
+   never enable it without the two Zodex config-file acknowledgements.
    `kimi-api` and `kimi-api-cn` are two different Moonshot platforms, not a
    fallback pair: the global console at platform.moonshot.ai and the mainland
    one at platform.moonshot.cn have separate accounts, separate billing, and

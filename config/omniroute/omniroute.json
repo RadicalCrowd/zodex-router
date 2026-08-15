@@ -6,6 +6,7 @@
       "displayName": "OmniRoute OAuth Broker",
       "kind": "openai-compatible",
       "ownedBy": "omniroute",
+      "protocol": "openai-responses",
       "baseUrl": "http://127.0.0.1:20128/v1",
       "credential": {
         "environment": [

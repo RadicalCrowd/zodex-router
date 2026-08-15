@@ -111,6 +111,10 @@ const GATEWAY_BASE = (
   process.env.KIMI_GATEWAY_BASE_URL ||
   loopback(PORTS.gateway, "/v1")
 ).replace(/\/+$/, "");
+const API_FORWARD_BASE = (
+  process.env.CODEX_ROUTER_API_FORWARD_BASE_URL ||
+  loopback(PORTS.api, "/v1")
+).replace(/\/+$/, "");
 const OAUTH_HEALTH =
   process.env.CODEX_ROUTER_OAUTH_HEALTH_URL ||
   process.env.KIMI_OAUTH_HEALTH_URL ||
@@ -466,6 +470,15 @@ function routedHeaders() {
     "Accept-Encoding": "identity",
     "User-Agent": `codex-router/${VERSION}`,
   };
+}
+
+function routedResponsesBase(route) {
+  // OmniRoute already implements the Responses surface. Sending it through
+  // LiteLLM's Responses adapter adds no protocol value and drops reasoning
+  // controls on some versions. Keep the native protocol and credential
+  // replacement in the authenticated API forwarder, but bypass the
+  // unnecessary translation hop.
+  return route?.provider === "omniroute-oauth" ? API_FORWARD_BASE : GATEWAY_BASE;
 }
 
 // LiteLLM translates Codex Responses requests into Chat Completions only after
@@ -1527,7 +1540,7 @@ async function summarize(request, payload, route, signal) {
   // Compaction re-enters the same provider as the routed turn; Fireworks
   // rejects this OpenAI search parameter at that boundary too.
   if (providerForModel(route)?.id === "fireworks") delete body.web_search_options;
-  const upstream = await fetch(`${GATEWAY_BASE}/responses`, {
+  const upstream = await fetch(`${routedResponsesBase(route)}/responses`, {
     method: "POST",
     headers: routedHeaders(),
     body: JSON.stringify(body),
@@ -1929,7 +1942,7 @@ async function handleResponses(request, response, requestUrl) {
         delete routed.reasoning_effort;
       }
       if (provider?.id === "fireworks") delete routed.web_search_options;
-      target = `${GATEWAY_BASE}/responses`;
+      target = `${routedResponsesBase(route)}/responses`;
       headers = routedHeaders();
       routedBody = Buffer.from(JSON.stringify(routed), "utf8");
     } else {
@@ -2087,6 +2100,7 @@ async function handleResponses(request, response, requestUrl) {
     const relayOpen = Boolean(emptyCompletionGuard);
     await pipeResponse(upstream, response, HOP_BY_HOP_HEADERS, firstPipeline.transforms, {
       leaveOpen: relayOpen,
+      signal: controller.signal,
     });
     usage = usageTransform?.tokenUsage();
     // Time to the first generated token, which is what an output-tokens-per-
@@ -2204,7 +2218,7 @@ async function handleResponses(request, response, requestUrl) {
             response,
             HOP_BY_HOP_HEADERS,
             secondPipeline.transforms,
-            { leaveOpen: true },
+            { leaveOpen: true, signal: controller.signal },
           );
           const retryClientWalkedAway =
             clientGone || (response.destroyed && !response.writableFinished);
@@ -2433,7 +2447,9 @@ async function handleNativeRequest(request, response, requestUrl, defaultModel) 
         onRetry: (event) => logUpstreamRetry(event, requestedModel, requestUrl.pathname),
       },
     );
-    await pipeResponse(upstream, response, HOP_BY_HOP_HEADERS);
+    await pipeResponse(upstream, response, HOP_BY_HOP_HEADERS, undefined, {
+      signal: controller.signal,
+    });
     recordUsageEvent({
       model: requestedModel,
       provider: "openai",

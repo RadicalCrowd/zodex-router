@@ -1326,8 +1326,9 @@ and GitHub build-provenance attestations.
 ```mermaid
 flowchart LR
   C["Codex Responses :4202"] --> L1["LiteLLM :4200"]
+  C --> A1["API keys / native Responses :4203"]
   L1 --> K1["Kimi OAuth :4201"]
-  L1 --> A1["API keys :4203"]
+  L1 --> A1
   K1 --> P["External providers"]
   A1 --> P
 ```
@@ -1335,7 +1336,10 @@ flowchart LR
 Codex sends the Responses API.
 LiteLLM translates that contract to each provider's native protocol,
 including OpenAI-compatible Chat Completions and Anthropic Messages, with
-streaming and tool-call shapes preserved. Every listener binds to `127.0.0.1`.
+streaming and tool-call shapes preserved. A Responses-native provider such as
+`omniroute-oauth` bypasses that translation hop and goes directly through the
+authenticated API forwarder, preserving native reasoning fields and client
+cancellation. Every listener binds to `127.0.0.1`.
 
 The router authenticates the caller before reading model traffic and
 passes only a random internal key to LiteLLM. The final forwarder discards
