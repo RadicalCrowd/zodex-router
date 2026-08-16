@@ -220,10 +220,17 @@ test(
             output: [],
           },
         })}\n\n`);
+        response.write(`event: response.reasoning_summary_text.delta\ndata: ${JSON.stringify({
+          type: "response.reasoning_summary_text.delta",
+          item_id: "rs_zodex_stream",
+          output_index: 0,
+          summary_index: 0,
+          delta: "OMNIROUTE_REASONING_SUMMARY_OK",
+        })}\n\n`);
         response.write(`event: response.output_text.delta\ndata: ${JSON.stringify({
           type: "response.output_text.delta",
           item_id: "msg_zodex_stream",
-          output_index: 0,
+          output_index: 1,
           content_index: 0,
           delta: "OMNIROUTE_STREAM_OK",
         })}\n\n`);
@@ -235,13 +242,23 @@ test(
             created_at: Math.floor(Date.now() / 1000),
             status: "completed",
             model: UPSTREAM_MODEL,
-            output: [{
-              id: "msg_zodex_stream",
-              type: "message",
-              role: "assistant",
-              status: "completed",
-              content: [{ type: "output_text", text: "OMNIROUTE_STREAM_OK", annotations: [] }],
-            }],
+            output: [
+              {
+                id: "rs_zodex_stream",
+                type: "reasoning",
+                summary: [{
+                  type: "summary_text",
+                  text: "OMNIROUTE_REASONING_SUMMARY_OK",
+                }],
+              },
+              {
+                id: "msg_zodex_stream",
+                type: "message",
+                role: "assistant",
+                status: "completed",
+                content: [{ type: "output_text", text: "OMNIROUTE_STREAM_OK", annotations: [] }],
+              },
+            ],
             usage: { input_tokens: 12, output_tokens: 4, total_tokens: 16 },
           },
         })}\n\n`);
@@ -411,11 +428,18 @@ test(
       const streamResponse = await fetch(`${base}/responses`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: ROUTER_MODEL, input: "STREAM_MARKER", stream: true }),
+        body: JSON.stringify({
+          model: ROUTER_MODEL,
+          input: "STREAM_MARKER",
+          reasoning: { effort: "high", summary: "auto" },
+          stream: true,
+        }),
       });
       const streamBody = await streamResponse.text();
       assert.equal(streamResponse.status, 200, `${streamBody}\n${stackOutput}`);
       assert.match(streamBody, /OMNIROUTE_STREAM_OK/);
+      assert.match(streamBody, /response\.reasoning_summary_text\.delta/);
+      assert.match(streamBody, /OMNIROUTE_REASONING_SUMMARY_OK/);
 
       const cancelUrl = new URL(`${base}/responses`);
       await new Promise((resolve, reject) => {
@@ -518,6 +542,9 @@ test(
       );
       assert.ok(reasoningRequest);
       assert.equal(reasoningRequest.body.reasoning.effort, "high");
+      const streamRequest = received.find(({ body }) => payloadText(body).includes("STREAM_MARKER"));
+      assert.ok(streamRequest);
+      assert.deepEqual(streamRequest.body.reasoning, { effort: "high", summary: "auto" });
     } finally {
       await stopProcess(stack);
       await new Promise((resolve) => mock.close(resolve));
