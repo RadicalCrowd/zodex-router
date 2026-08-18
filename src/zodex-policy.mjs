@@ -154,8 +154,8 @@ export function applyZodexProviderPolicy(providerIds, environment = process.env)
 }
 
 function modelPrefixes(providerId) {
-  if (providerId === "anthropic") return ["cc/", "anthropic/"];
-  if (providerId === "google") return ["gemini/", "google/"];
+  if (providerId === "anthropic") return ["cc/", "anthropic/", "agy/", "antigravity/"];
+  if (providerId === "google") return ["gemini/", "google/", "agy/", "antigravity/"];
   return [`${providerId}/`];
 }
 

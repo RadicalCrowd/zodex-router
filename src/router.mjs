@@ -1882,7 +1882,7 @@ async function handleResponses(request, response, requestUrl) {
       // (node_repl, peekaboo, github, ...). Chat-completions providers need
       // every namespace flattened into ordinary functions; the response
       // transform maps calls back to the client's native namespace shape.
-      if (provider?.protocol !== "openai-responses") {
+      if (provider?.protocol !== "openai-responses" || provider?.id === "omniroute-oauth") {
         // Relay the app's full native toolset (threads, automations, app
         // navigation) to the provider. The client registers these tools with
         // deferLoading and executes the calls natively, but only sends a
