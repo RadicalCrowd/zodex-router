@@ -192,6 +192,10 @@ export function normalizeSchemaLiterals(schema, depth = 0) {
     else next[key] = value;
   };
 
+  if ("encrypted" in schema) {
+    replace("encrypted", undefined);
+  }
+
   const types = declaredTypes(schema);
   if (types.length) {
     if (Array.isArray(schema.enum)) {
