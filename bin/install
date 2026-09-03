@@ -183,6 +183,7 @@ rollback() {
   if [ "$service_installed" = true ]; then
     node src/service.mjs uninstall >/dev/null 2>&1 || true
   fi
+  node src/zodex-config-watch.mjs uninstall >/dev/null 2>&1 || true
   if [ "$config_enabled" = true ]; then
     node "$config_manager" "$config_disable_command" >/dev/null 2>&1 || true
   elif [ "$adopt_native_catalog" = true ]; then
@@ -229,6 +230,7 @@ else
 fi
 service_installed=true
 node src/service.mjs install
+node src/zodex-config-watch.mjs install
 node src/wait-health.mjs
 node src/install-manifest.mjs record >/dev/null
 # Adopt an already-built companion into launchd's care. Installs that never

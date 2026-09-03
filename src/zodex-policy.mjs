@@ -1,18 +1,33 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const ACKNOWLEDGEMENT_RISK = "zodex-oauth-risk-v1";
 const ACKNOWLEDGEMENT_EFFECTS = "zodex-oauth-effects-v1";
+const DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE = "zodex-developer-update-source-v1";
+const DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL = "zodex-developer-update-install-v1";
 const OMNIROUTE_PROVIDER_ID = "omniroute-oauth";
 const SECRET_KEY_PATTERN = /(?:api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret|credential|private[-_]?key)/iu;
 const ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/u;
 const BROKER_PROVIDERS = Object.freeze({
-  omniroute: new Set(["anthropic", "google"]),
+  omniroute: new Set(["anthropic", "google", "opencode", "kilo"]),
   "opencode-community": new Set(),
 });
 
 function isObject(value) {
   return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  if (isObject(value)) {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export function zodexConfigRevision(value) {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
 function assertKnownKeys(value, allowed, location) {
@@ -63,10 +78,28 @@ function parseConnection(value, location) {
   };
 }
 
+function parseDeveloperUpdates(value) {
+  if (!isObject(value)) throw new Error("config.developerUpdates must be an object");
+  assertKnownKeys(value, ["enabled", "acknowledgements"], "config.developerUpdates");
+  if (typeof value.enabled !== "boolean") throw new Error("config.developerUpdates.enabled must be a boolean");
+  if (!Array.isArray(value.acknowledgements) || value.acknowledgements.some((item) => typeof item !== "string")) {
+    throw new Error("config.developerUpdates.acknowledgements must be an array of strings");
+  }
+  const acknowledgements = [...new Set(value.acknowledgements)];
+  const expected = [DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE, DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL];
+  const unknown = acknowledgements.find((item) => !expected.includes(item));
+  if (unknown) throw new Error(`config.developerUpdates has unknown acknowledgement '${unknown}'`);
+  return {
+    enabled: value.enabled,
+    acknowledgements,
+    active: value.enabled && expected.every((item) => acknowledgements.includes(item)),
+  };
+}
+
 export function parseZodexOmniroutePolicy(value) {
   if (!isObject(value)) throw new Error("config must be an object");
   rejectSecrets(value);
-  assertKnownKeys(value, ["version", "oauth", "remoteControl"], "config");
+  assertKnownKeys(value, ["version", "oauth", "remoteControl", "developerUpdates"], "config");
   if (value.version !== 1) throw new Error("config.version must be 1");
   if (!isObject(value.oauth)) throw new Error("config.oauth must be an object");
   assertKnownKeys(value.oauth, ["brokers"], "config.oauth");
@@ -100,6 +133,9 @@ export function parseZodexOmniroutePolicy(value) {
       value.remoteControl.extensions.some((id) => !ID_PATTERN.test(id))) {
     throw new Error("config.remoteControl.extensions must be an array of module ids");
   }
+  const developerUpdates = value.developerUpdates == null
+    ? { enabled: false, acknowledgements: [], active: false }
+    : parseDeveloperUpdates(value.developerUpdates);
   const broker = parsedBrokers.omniroute;
   const activeProviders = broker?.enabled
     ? Object.entries(broker.providers)
@@ -107,17 +143,26 @@ export function parseZodexOmniroutePolicy(value) {
     .map(([id]) => id)
     .sort()
     : [];
-  return { activeProviders };
+  return { activeProviders, developerUpdates };
 }
 
 export function readZodexOmniroutePolicy(environment = process.env) {
   const file = zodexConfigPath(environment);
-  if (!file || !existsSync(file)) return { state: "missing", file, activeProviders: [] };
+  if (!file || !existsSync(file)) {
+    return {
+      state: "missing",
+      file,
+      activeProviders: [],
+      developerUpdates: { enabled: false, acknowledgements: [], active: false },
+      revision: "missing",
+    };
+  }
   try {
     let text;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const before = statSync(file);
+      const before = lstatSync(file);
       if (!before.isFile()) throw new Error("config path is not a regular file");
+      if (before.isSymbolicLink()) throw new Error("config path must not be a symbolic link");
       if (before.size > 64 * 1024) throw new Error("config file exceeds 64 KiB");
       if (typeof process.getuid === "function" && before.uid !== process.getuid()) {
         throw new Error("config file is not owned by the current user");
@@ -126,7 +171,7 @@ export function readZodexOmniroutePolicy(environment = process.env) {
         throw new Error("config file permissions must be 0600");
       }
       text = readFileSync(file, "utf8");
-      const after = statSync(file);
+      const after = lstatSync(file);
       if (
         before.ino === after.ino &&
         before.size === after.size &&
@@ -135,13 +180,18 @@ export function readZodexOmniroutePolicy(environment = process.env) {
       text = undefined;
     }
     if (text === undefined) throw new Error("config changed while it was being read; refresh again");
-    return { state: "valid", file, ...parseZodexOmniroutePolicy(JSON.parse(text)) };
+    const value = JSON.parse(text);
+    const policy = parseZodexOmniroutePolicy(value);
+    return { state: "valid", file, ...policy, revision: zodexConfigRevision(value) };
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
       state: "invalid",
       file,
       activeProviders: [],
-      error: error instanceof Error ? error.message : String(error),
+      error: message,
+      developerUpdates: { enabled: false, acknowledgements: [], active: false },
+      revision: `invalid-${zodexConfigRevision(message)}`,
     };
   }
 }
@@ -156,6 +206,7 @@ export function applyZodexProviderPolicy(providerIds, environment = process.env)
 function modelPrefixes(providerId) {
   if (providerId === "anthropic") return ["cc/", "anthropic/", "agy/", "antigravity/"];
   if (providerId === "google") return ["gemini/", "google/", "agy/", "antigravity/"];
+  if (providerId === "opencode") return ["opencode/", "oc/"];
   return [`${providerId}/`];
 }
 
@@ -171,4 +222,9 @@ export function zodexOmnirouteModelEnabled(modelId, environment = process.env) {
 export const ZODEX_ACKNOWLEDGEMENTS = Object.freeze([
   ACKNOWLEDGEMENT_RISK,
   ACKNOWLEDGEMENT_EFFECTS,
+]);
+
+export const ZODEX_DEVELOPER_UPDATE_ACKNOWLEDGEMENTS = Object.freeze([
+  DEVELOPER_UPDATE_ACKNOWLEDGEMENT_SOURCE,
+  DEVELOPER_UPDATE_ACKNOWLEDGEMENT_INSTALL,
 ]);

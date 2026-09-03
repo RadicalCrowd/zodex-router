@@ -8,6 +8,7 @@ import {
   applyZodexProviderPolicy,
   parseZodexOmniroutePolicy,
   readZodexOmniroutePolicy,
+  zodexConfigRevision,
   zodexOmnirouteModelEnabled,
 } from "../src/zodex-policy.mjs";
 
@@ -21,8 +22,8 @@ function config({ broker = true, anthropic = acknowledgements, google = [] } = {
         omniroute: {
           enabled: broker,
           providers: {
-            anthropic: { enabled: true, acknowledgements: anthropic },
-            google: { enabled: true, acknowledgements: google },
+            anthropic: { enabled: true, acknowledgements: [...anthropic] },
+            google: { enabled: true, acknowledgements: [...google] },
           },
         },
       },
@@ -112,4 +113,18 @@ test("policy reader refuses group-readable configuration", { skip: process.platf
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("developer update acknowledgements are default-off and part of the semantic revision", () => {
+  const base = config();
+  const parsed = parseZodexOmniroutePolicy(base);
+  assert.equal(parsed.developerUpdates.active, false);
+  const enabled = config();
+  enabled.developerUpdates = {
+    enabled: true,
+    acknowledgements: ["zodex-developer-update-source-v1", "zodex-developer-update-install-v1"],
+  };
+  const updatePolicy = parseZodexOmniroutePolicy(enabled);
+  assert.equal(updatePolicy.developerUpdates.active, true);
+  assert.notEqual(zodexConfigRevision(parsed), zodexConfigRevision(updatePolicy));
 });

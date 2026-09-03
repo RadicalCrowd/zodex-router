@@ -429,6 +429,10 @@ function rewriteModelMessages(messages, model) {
 function normalizeNativeModel(model) {
   return {
     ...model,
+    supports_parallel_tool_calls:
+      typeof model.supports_parallel_tool_calls === "boolean"
+        ? model.supports_parallel_tool_calls
+        : true,
     supports_reasoning_summaries:
       typeof model.supports_reasoning_summaries === "boolean"
         ? model.supports_reasoning_summaries
